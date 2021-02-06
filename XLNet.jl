@@ -497,7 +497,8 @@ function(x::XLNetModel)(inp_k,
     ##### Positional encoding
     pos_emb = relative_positional_encoding(
         qlen, klen, x.d_model, x.clamp_len, attn_type, x.bi_data, bsz )
-    pos_emb = repeat(pos_emb,1,bsz,1)
+
+    #pos_emb = repeat(pos_emb,1,bsz,1)
     pos_emb = dropout(pos_emb, x.p_drop)
 
     if mems == nothing
@@ -687,6 +688,7 @@ XLNetClassifier( w::Dict, model ) = XLNetClassifier(model,
 
 function XLNetClassifier( path::String )
     @load path weights
+    w=weights
     model = create_xlnet_model( xlnet_base_hparams, w["model"] )
     XLNetClassifier(model,
                     Linear( paramf( w["projection"]["w"] ), paramf( w["projection"]["b"] ), tanh ),
@@ -698,10 +700,10 @@ end
 
 function (c::XLNetClassifier)(x)
     #Size of x is 2 x BS
-    token_ids = hcat(x[1,:]...)
-    attn_mask = hcat(x[2,:]...)
+    token_ids = x[:,1,:]
+    attn_mask = x[:,2,:]
+
     x = c.model( token_ids , nothing, attn_mask )
- 
     #Note: getindex! doesn't bacprob properly for 3 dimensional arrays.
     y = permutedims( x, [2,1,3] )
     y = reshape( y,:,size(x,3) )

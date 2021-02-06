@@ -1,4 +1,5 @@
 using FileIO
+using JLD2
 
 atype = Array{Float32}
 
@@ -98,26 +99,29 @@ end
 
 
 function save(path::String, p::XLNetClassifier)
+    atype = Array{Float32}
     m = p.model
-    wm = create_weight_dict(model.n_layer)
+    wm = create_weight_dict(m.n_layer)
 
-    for (i,layer) in enumerate(model.layers)
-        println("i = " ,i)
+    for (i,layer) in enumerate(m.layers)   
         wm[ "layer_" * string(i-1) ] = load_layer_from_model( layer )
     end
     
-    wm["word_emb"] = atype( value( model.embedding.lookup_table ) )
-    wm["r_w_bias"] = atype( value( model.r_w_bias ) )
-    wm["r_r_bias"] = atype( value( model.r_r_bias ) )
-    wm["r_s_bias"] = atype( value( model.r_s_bias ) )
-    wm["seg_emb"] =  atype( value( model.seg_embed ) )
-    wm["mask_emb"] = atype( value( model.mask_emb ) )
+    wm["word_emb"] = atype( value( m.embedding.lookup_table ) )
+    wm["r_w_bias"] = atype( value( m.r_w_bias ) )
+    wm["r_r_bias"] = atype( value( m.r_r_bias ) )
+    wm["r_s_bias"] = atype( value( m.r_s_bias ) )
+    wm["seg_emb"] =  atype( value( m.seg_embed ) )
 
     wp = Dict()
     wp["model"] = wm
     wp["projection"] = get_linear( p.projection )
-    wp["classification"] = Dict( "w"=> p.classification.w, "b"=>p.classification.b )
-    save(path,wp)
+    wp["classification"] = Dict( "w"=> atype( value(p.classification.w) ),
+                                 "b"=> atype( value(p.classification.b) ) )
+
+    weights = wp
+    @save path weights
+    #save(path, wp)
 end
 
 function load_weights(path)
