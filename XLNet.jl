@@ -22,12 +22,11 @@ using Knet.Ops21: gelu
 using JLD2
 import CUDA
 
-export specaialTokens, xlnet_base_hparams, create_xlnet_model, XLNetModel, XLNetClassifier, save
-
-fptype=Float32
-atype = KnetArray{ fptype }
-
+export specaialTokens, xlnet_base_hparams, create_xlnet_model, XLNetModel, XLNetClassifier, prepare_sample, save
+ 
 specaialTokens = Dict( "<SEP>" => 4, "<CLS>" => 3 )
+fptype= Float32
+atype = KnetArray{ fptype }
 
 mutable struct EmbeddingLookup
   lookup_table #size: (n_tokens, emb_length)
@@ -38,12 +37,13 @@ function(e::EmbeddingLookup)(inp)
 end
 
 function paramf(x;freeze=false)
+    fptype= Float32
+    atype = KnetArray{ fptype }
 
     if freeze==true
         return atype(x)
     else
         return Param( atype(x) )
-        #return Param( atype(x) , Adam( lr = 1e-5 ) )
     end
 
 end
@@ -334,7 +334,7 @@ returns: [klen+qlen,1,d_model]
 """
 
 function relative_positional_encoding(qlen, klen, d_model, clamp_len, attn_type,
-                                      bi_data , bsz ; dtype = fptype )
+                                      bi_data , bsz ; dtype = fptype, atype = KnetArray{ fptype } )
   """create relative positional encoding."""
     
     freq_seq = collect( range( 0 , step=2.0 , stop=d_model-1 ) )
@@ -410,7 +410,8 @@ function(x::XLNetModel)(inp_k,
                         perm_mask=nothing,
                         target_mapping=nothing,
                         inp_q=nothing,
-                        attn_type = "bi", dtype = fptype)
+                        attn_type = "bi", dtype = fptype, atype = KnetArray{ fptype } )
+
     
     new_mems=[]
     bsz = size(inp_k)[2]
@@ -475,7 +476,6 @@ function(x::XLNetModel)(inp_k,
 
     word_emb_k = x.embedding( inp_k .+ 1 )
     output_h = dropout( word_emb_k, x.p_drop )
-                        
     ##### Segment embedding
     if seg_id != nothing
 
@@ -530,6 +530,7 @@ function(x::XLNetModel)(inp_k,
                                 x.p_drop,
                                 x.p_dropatt,
                                 i)
+        
     end
         
     output=output_h
@@ -575,7 +576,7 @@ function (rma::AttnLayer)(h,r,r_w_bias,r_r_bias,seg_mat, r_s_bias, seg_embed,att
         d_model, n_head, d_head,dropout,dropatt, i)
     
     """Multi-head attention with relative positional encoding."""
-    
+
     scale = convert(fptype,1/sqrt(d_head) )
     if mems != nothing && length( size(mems)) > 1 
         cat = cat(dims=1,mems,h)
@@ -590,7 +591,7 @@ function (rma::AttnLayer)(h,r,r_w_bias,r_r_bias,seg_mat, r_s_bias, seg_embed,att
     
     #positional heads
     k_head_r = rma.head_proj(r,'r', i)
-    
+
     #core attention ops
     attn_vec = rel_attn_core(q_head_h , k_head_h , v_head_h, k_head_r,seg_embed,seg_mat,r_w_bias, r_r_bias,r_s_bias,attn_mask,scale)
 
@@ -604,7 +605,7 @@ end
 
 xlnet_base_hparams = Dict(  "n_token" => 32000,
                             "n_layer" => 12,
-                            "n_freeze" => 6,
+                            "n_freeze" => 10,
                             "n_head" => 12,
                             "d_head" => 64,
                             "d_inner" => 768,
@@ -701,9 +702,10 @@ end
 function (c::XLNetClassifier)(x)
     #Size of x is 2 x BS
     token_ids = x[:,1,:]
-    attn_mask = x[:,2,:]
+    seg_ids = x[:,2,:]
+    attn_mask = x[:,3,:]
 
-    x = c.model( token_ids , nothing, attn_mask )
+    x = c.model( token_ids , seg_ids, attn_mask )
     #Note: getindex! doesn't bacprob properly for 3 dimensional arrays.
     y = permutedims( x, [2,1,3] )
     y = reshape( y,:,size(x,3) )
@@ -719,4 +721,6 @@ end
 (c::XLNetClassifier)(x,y) = nll( c(x),y )
 
 include("weight_manager.jl")
+include("preprocessing.jl")
+
 end
